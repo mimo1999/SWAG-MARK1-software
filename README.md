@@ -1,21 +1,22 @@
 # SWAG MARK1 — Autonomous Self-Driving Car
 
-A Raspberry Pi-based autonomous car that uses a camera and a neural network to navigate road-like environments. A human driver first demonstrates the driving behavior; the system records labeled frames, trains an ANN, and the car then drives itself using live inference.
+A Raspberry Pi-based autonomous car that uses a camera and a CNN to navigate road-like environments. A human driver first demonstrates the driving behavior; the system records labeled frames, trains a convolutional neural network, and the car then drives itself using live inference.
 
 ---
 
 ## How It Works
 
 ```
-[PiCamera] → frame → image pipeline → ANN inference → GPIO motor commands
+[PiCamera] → frame → image pipeline → CNN inference → GPIO motor commands
                           │
                grayscale → crop bottom half
                → Gaussian blur → Laplacian edge detection
                → erode / dilate / morphological close
                → flatten to 1×50400 vector
+               → lane_cnn.tflite (embedded Reshape → Resize 64×64 → Rescale ÷255)
 ```
 
-The network is a 3-class OpenCV `ANN_MLP` (50400 → 32 → 3) trained via backpropagation. The three output classes are **forward**, **left**, and **right**, which map directly to GPIO pin states on the motor and steering drivers.
+The network is a 4-block custom CNN (~455 K parameters) trained with 5× data augmentation (horizontal flip with label swap, random shift, brightness jitter, contrast jitter). The three output classes are **forward**, **left**, and **right**, which map directly to GPIO pin states on the motor and steering drivers. The model is exported as a TFLite file for efficient inference on the Pi.
 
 A separate remote-control Flask API (`car/controller.py`) lets you drive the car manually over HTTP during data collection.
 
@@ -37,7 +38,7 @@ A separate remote-control Flask API (`car/controller.py`) lets you drive the car
 ```
 car/          Scripts deployed to and run on the Raspberry Pi
 training/     ML pipeline — data collection, training, evaluation (runs on laptop)
-models/       Trained OpenCV ANN_MLP model files (.xml)
+models/       Trained model files (.tflite, .keras, .xml)
 data/         Labeled training datasets (.npz)
 docs/         Project documentation and design report
 ```
@@ -56,6 +57,8 @@ pip install -r car/requirements.txt
 pip install -r training/requirements.txt
 ```
 
+Update IP addresses in `config.py` to match your network before running anything.
+
 ---
 
 ## Usage
@@ -64,11 +67,9 @@ pip install -r training/requirements.txt
 
 Run the collection server on your **laptop** and the streaming client on the **Pi** simultaneously.
 
-Update the IP addresses in `training/collect_training.py` and `car/stream_client.py` to match your network before running.
-
 ```bash
 # Laptop — starts the collection server and pygame window
-python training/collect_training.py
+python training/collect_training.py --laplace
 
 # Raspberry Pi — streams camera frames to the laptop
 python car/stream_client.py
@@ -76,26 +77,33 @@ python car/stream_client.py
 
 Use the arrow keys in the pygame window to drive the car. Each keypress labels the current frame and sends an HTTP command to the car via `car/controller.py`. Press **Escape** to stop and save the dataset to `data/`.
 
-`collect_training_laplace_filter.py` is an alternative collector that applies a Sobel filter before labeling, which can improve training quality on high-contrast tracks.
+> **Always use `--laplace`** when collecting data for the CNN. It applies the identical preprocessing pipeline as the Pi (Gaussian blur → Laplacian → erode/dilate/close), ensuring training and inference see the same feature maps. Each session is saved as a timestamped `.npz` file so no data is overwritten.
 
 ### 2. Train the model
 
 ```bash
-# Run from the repo root
-python training/ann_training.py
+# Run from the training/ directory
+python training/cnn_training.py
 ```
 
-Loads all `.npz` files from `data/`, trains the ANN, prints validation accuracy, and saves the model to `models/ann.xml`.
+Loads all `.npz` files from `data/`, applies 5× augmentation, trains the CNN for up to 50 epochs with early stopping, and saves:
+- `models/lane_cnn.keras` — full Keras model
+- `models/lane_cnn.tflite` — TFLite model for Pi deployment
+
+To compare all models in `models/` against the full dataset:
+```bash
+python training/benchmark_models.py
+```
 
 ### 3. Deploy and drive autonomously
 
-Copy `models/ann.xml` to the Raspberry Pi, then:
+Copy `models/lane_cnn.tflite` to the Raspberry Pi, then:
 
 ```bash
 python car/pi_driver_on_pi.py
 ```
 
-The car will start driving based on live camera input. Update the server IP in the script before running.
+The car will start driving based on live camera input.
 
 ### 4. Remote control (optional)
 
@@ -103,7 +111,7 @@ The car will start driving based on live camera input. Update the server IP in t
 python car/controller.py
 ```
 
-Exposes a REST API on port 5000:
+Exposes a REST API on port 5000. A watchdog stops the car automatically if `/ping` is not received within 1 second.
 
 | Endpoint | Action |
 |---|---|
@@ -113,17 +121,23 @@ Exposes a REST API on port 5000:
 | `GET /right` | Turn right |
 | `GET /pause` | Pause motors |
 | `GET /stop` | Stop and cut power |
+| `GET /ping` | Watchdog keepalive |
+
+---
+
+## Model Performance
+
+| Model | Accuracy | Notes |
+|---|---|---|
+| `lane_cnn_best.keras` | **78.4%** | Best CNN checkpoint |
+| `lane_cnn.tflite` | 76.5% | Deployed on Pi |
+| `ann_best.xml` | 57.1% | Baseline ANN |
 
 ---
 
 ## Configuration
 
-Network IPs and ports are hardcoded in:
-- `car/pi_driver_on_pi.py` — bind address and server IP
-- `car/stream_client.py` — bind address and server IP
-- `training/collect_training.py` — listen address and car controller IP
-
-Update these to match your network before running.
+All network IPs and ports are centralised in `config.py` at the repo root. Update `PI_HOST` and `LAPTOP_HOST` to match your network before running.
 
 ---
 
