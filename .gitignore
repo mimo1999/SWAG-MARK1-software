@@ -1,0 +1,20 @@
+# Claude
+CLAUDE.md
+
+# Training data and model weights
+data/
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Archives / local copies
+non_git_version_1/
+non_git_version_2/

@@ -1,16 +1,20 @@
-
 import io
 import socket
 import struct
+import sys
 import time
+from pathlib import Path
 import picamera
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config
 
 print("about to connect")
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.bind(('10.1.185.46',7000))
+client_socket.bind((config.PI_HOST, config.PI_STREAM_PORT))
 print("got socket")
 client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-client_socket.connect(('10.1.187.22', 8000))
+client_socket.connect((config.LAPTOP_HOST, config.LAPTOP_STREAM_PORT))
 print("finish connection")
 connection = client_socket.makefile('wb')
 
@@ -33,7 +37,7 @@ try:
             stream.seek(0)
             stream.truncate()
     connection.write(struct.pack('<L', 0))
-except (socket.error, e):
+except socket.error as e:
     print(e)
 finally:
     connection.close()

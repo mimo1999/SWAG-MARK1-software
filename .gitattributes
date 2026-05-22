@@ -1,0 +1,13 @@
+# Normalise all text files to LF in the repo, check out as-is on all platforms
+* text=auto eol=lf
+
+# Binaries — never touch line endings
+*.pdf binary
+*.tflite binary
+*.keras binary
+*.h5 binary
+*.xml binary
+*.npz binary
+*.png binary
+*.jpg binary
+*.jpeg binary

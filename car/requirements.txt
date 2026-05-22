@@ -1,0 +1,6 @@
+flask
+numpy
+opencv-python
+picamera
+RPi.GPIO
+tflite-runtime
